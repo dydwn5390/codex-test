@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Todo App</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div>
+        <p class="eyebrow">Spring Boot + Java 21</p>
+        <h1>할일 관리</h1>
+        <p class="subtitle">해야 할 일을 빠르게 등록하고 완료 상태를 관리하세요.</p>
+      </div>
+      <div class="stats">
+        <div>
+          <span id="totalCount">0</span>
+          <p>전체</p>
+        </div>
+        <div>
+          <span id="doneCount">0</span>
+          <p>완료</p>
+        </div>
+        <div>
+          <span id="pendingCount">0</span>
+          <p>진행</p>
+        </div>
+      </div>
+    </header>
+
+    <section class="card form-card">
+      <h2>새 할일 추가</h2>
+      <form id="todoForm">
+        <div class="field">
+          <label for="title">제목</label>
+          <input id="title" name="title" type="text" placeholder="예: 회의 준비" required maxlength="100" />
+        </div>
+        <div class="field">
+          <label for="description">설명</label>
+          <textarea id="description" name="description" rows="3" placeholder="상세 내용을 적어주세요" maxlength="1000"></textarea>
+        </div>
+        <div class="field">
+          <label for="dueDate">마감일</label>
+          <input id="dueDate" name="dueDate" type="date" />
+        </div>
+        <button class="primary" type="submit">추가하기</button>
+        <p class="helper" id="formMessage"></p>
+      </form>
+    </section>
+
+    <section class="list">
+      <div class="list-header">
+        <h2>할일 목록</h2>
+        <div class="filters">
+          <button type="button" class="chip active" data-filter="all">전체</button>
+          <button type="button" class="chip" data-filter="pending">진행</button>
+          <button type="button" class="chip" data-filter="completed">완료</button>
+        </div>
+      </div>
+      <div id="todoList" class="todo-grid"></div>
+      <p id="emptyState" class="empty">아직 등록된 할일이 없습니다.</p>
+    </section>
+  </div>
+
+  <script>
+    const apiBase = '/api/todos';
+    const todoList = document.getElementById('todoList');
+    const emptyState = document.getElementById('emptyState');
+    const totalCount = document.getElementById('totalCount');
+    const doneCount = document.getElementById('doneCount');
+    const pendingCount = document.getElementById('pendingCount');
+    const form = document.getElementById('todoForm');
+    const formMessage = document.getElementById('formMessage');
+    const filterButtons = Array.from(document.querySelectorAll('.chip'));
+    let todos = [];
+    let activeFilter = 'all';
+
+    async function fetchTodos() {
+      const response = await fetch(apiBase);
+      if (!response.ok) {
+        throw new Error('목록을 불러오지 못했습니다.');
+      }
+      todos = await response.json();
+      renderTodos();
+      updateStats();
+    }
+
+    function updateStats() {
+      const completed = todos.filter((todo) => todo.completed).length;
+      totalCount.textContent = todos.length;
+      doneCount.textContent = completed;
+      pendingCount.textContent = todos.length - completed;
+    }
+
+    function filterTodos() {
+      if (activeFilter === 'completed') {
+        return todos.filter((todo) => todo.completed);
+      }
+      if (activeFilter === 'pending') {
+        return todos.filter((todo) => !todo.completed);
+      }
+      return todos;
+    }
+
+    function renderTodos() {
+      const filtered = filterTodos();
+      todoList.innerHTML = '';
+      if (filtered.length === 0) {
+        emptyState.style.display = 'block';
+        return;
+      }
+      emptyState.style.display = 'none';
+      filtered.forEach((todo) => {
+        const card = document.createElement('article');
+        card.className = 'card todo-card';
+        card.innerHTML = `
+          <header>
+            <h3>${todo.title}</h3>
+            <span class="status ${todo.completed ? 'done' : 'pending'}">
+              ${todo.completed ? '완료' : '진행 중'}
+            </span>
+          </header>
+          <p class="description">${todo.description || '설명이 없습니다.'}</p>
+          <div class="meta">
+            <span>마감일: ${todo.dueDate ?? '미정'}</span>
+            <span>업데이트: ${new Date(todo.updatedAt).toLocaleString('ko-KR')}</span>
+          </div>
+          <div class="actions">
+            <button class="secondary" data-action="toggle" data-id="${todo.id}">
+              ${todo.completed ? '되돌리기' : '완료 처리'}
+            </button>
+            <button class="danger" data-action="delete" data-id="${todo.id}">삭제</button>
+          </div>
+        `;
+        todoList.appendChild(card);
+      });
+    }
+
+    async function createTodo(payload) {
+      const response = await fetch(apiBase, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: '요청 실패' }));
+        throw new Error(error.message || '요청 실패');
+      }
+      return response.json();
+    }
+
+    async function toggleTodo(id, completed) {
+      await fetch(`${apiBase}/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed })
+      });
+    }
+
+    async function deleteTodo(id) {
+      await fetch(`${apiBase}/${id}`, { method: 'DELETE' });
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      formMessage.textContent = '';
+      const payload = {
+        title: form.title.value.trim(),
+        description: form.description.value.trim() || null,
+        dueDate: form.dueDate.value || null
+      };
+      if (!payload.title) {
+        formMessage.textContent = '제목을 입력해주세요.';
+        return;
+      }
+      try {
+        await createTodo(payload);
+        form.reset();
+        await fetchTodos();
+      } catch (error) {
+        formMessage.textContent = error.message;
+      }
+    });
+
+    todoList.addEventListener('click', async (event) => {
+      const target = event.target.closest('button');
+      if (!target) {
+        return;
+      }
+      const id = target.dataset.id;
+      const action = target.dataset.action;
+      const todo = todos.find((item) => item.id === Number(id));
+      if (!todo) {
+        return;
+      }
+      if (action === 'toggle') {
+        await toggleTodo(id, !todo.completed);
+      }
+      if (action === 'delete') {
+        await deleteTodo(id);
+      }
+      await fetchTodos();
+    });
+
+    filterButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        filterButtons.forEach((btn) => btn.classList.remove('active'));
+        button.classList.add('active');
+        activeFilter = button.dataset.filter;
+        renderTodos();
+      });
+    });
+
+    fetchTodos().catch((error) => {
+      emptyState.textContent = error.message;
+      emptyState.style.display = 'block';
+    });
+  </script>
+</body>
+</html>
